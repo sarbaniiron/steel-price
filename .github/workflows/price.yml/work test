@@ -1,0 +1,25 @@
+name: Send Price to WhatsApp
+
+on:
+  schedule:
+    - cron: "0 */2 * * *"   # هر ۲ ساعت یک بار
+  workflow_dispatch:        # اجرا دستی هم بشه
+
+jobs:
+  send-price:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: "3.x"
+
+      - name: Install dependencies
+        run: pip install requests
+
+      - name: Run Python script
+        run: python script.py
+        
