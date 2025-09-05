@@ -1,11 +1,11 @@
-name: Steel Price Checker Selenium
+رname: Steel Price Checker Selenium
 
 on:
   schedule:
-    - cron: "30 4 * * *"    # ۸:۰۰ صبح ایران
-    - cron: "30 8 * * *"    # ۱۲:۰۰ ظهر ایران
-    - cron: "30 12 * * *"   # ۱۶:۰۰ عصر ایران
-    - cron: "30 16 * * *"   # ۲۰:۰۰ شب ایران
+    - cron: "30 4 * * *"
+    - cron: "30 8 * * *"
+    - cron: "30 12 * * *"
+    - cron: "30 16 * * *"
   workflow_dispatch:
 
 jobs:
@@ -26,12 +26,10 @@ jobs:
         python -m pip install --upgrade pip
         pip install -r requirements.txt
 
-    - name: Install Google Chrome
-      run: |
-        sudo apt update
-        sudo apt install -y wget unzip xvfb
-        wget https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb
-        sudo dpkg -i google-chrome-stable_current_amd64.deb || sudo apt-get -f install -y
+    - name: Set up Chrome
+      uses: browser-actions/setup-chrome@v1
+      with:
+        chrome-version: stable
 
     - name: Run price checker
       env:
