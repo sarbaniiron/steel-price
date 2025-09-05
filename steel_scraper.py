@@ -1,13 +1,13 @@
 import requests
 from bs4 import BeautifulSoup
 import logging
-import random
 from datetime import datetime
 import jdatetime
 import os
 from telegram import Bot
 from telegram.error import TelegramError
 import pytz
+import re
 
 # تنظیمات لاگ‌گیری
 logging.basicConfig(
@@ -23,18 +23,15 @@ logger = logging.getLogger(__name__)
 def get_iran_time():
     """دریافت تاریخ و ساعت ایران"""
     try:
-        # تنظیم timezone برای ایران
         iran_timezone = pytz.timezone('Asia/Tehran')
         now_utc = datetime.utcnow()
         now_iran = now_utc.astimezone(iran_timezone)
         
-        # تبدیل به تاریخ شمسی
         jalali_date = jdatetime.datetime.fromgregorian(
             datetime=now_iran,
             locale='fa_IR'
         )
         
-        # فرمت تاریخ و ساعت فارسی
         date_str = jalali_date.strftime('%Y/%m/%d')
         time_str = jalali_date.strftime('%H:%M')
         
@@ -43,11 +40,6 @@ def get_iran_time():
     except Exception as e:
         logger.error(f"خطا در دریافت زمان ایران: {str(e)}")
         return "تاریخ نامعلوم"
-
-def get_fresh_proxy():
-    """دریافت پروکسی جدید و فعال"""
-    logger.info("ادامه بدون پروکسی")
-    return None
 
 def send_telegram_message(message):
     """ارسال پیام به تلگرام"""
@@ -64,157 +56,175 @@ def send_telegram_message(message):
         logger.info("پیام با موفقیت ارسال شد")
         return True
         
-    except TelegramError as e:
-        logger.error(f"خطا در ارسال پیام تلگرام: {str(e)}")
-        return False
     except Exception as e:
-        logger.error(f"خطای غیرمنتظره در ارسال پیام: {str(e)}")
+        logger.error(f"خطا در ارسال پیام: {str(e)}")
         return False
 
-def scrape_milgard_ahanonline():
-    """اسکراپ قیمت میلگرد A3 از آهن آنلاین به تفکیک شرکت و سایز"""
-    all_prices = {}
-    max_retries = 3
+def scrape_ahanonline_prices():
+    """استخراج قیمت‌های میلگرد A3 از آهن آنلاین"""
+    url = "https://ahanonline.com/product-category/میلگرد/قیمت-میلگرد/"
     
-    # تاریخ و ساعت ایران
-    iran_time = get_iran_time()
+    headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+        'Accept-Language': 'fa-IR,fa;q=0.9,en-US;q=0.8,en;q=0.7',
+        'Referer': 'https://ahanonline.com/',
+        'Connection': 'keep-alive'
+    }
     
-    for attempt in range(max_retries):
-        try:
-            # دریافت پروکسی
-            proxies = get_fresh_proxy()
+    try:
+        logger.info("در حال اتصال به آهن آنلاین...")
+        response = requests.get(url, headers=headers, timeout=30)
+        
+        if response.status_code != 200:
+            logger.error(f"خطای HTTP: {response.status_code}")
+            return None
             
-            url = "https://ahanonline.com/product-category/میلگرد/قیمت-میلگرد/"
-            headers = {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
-                'Accept-Language': 'fa-IR,fa;q=0.9,en-US;q=0.8,en;q=0.7',
-                'Referer': 'https://ahanonline.com/',
-                'Connection': 'keep-alive'
-            }
+        soup = BeautifulSoup(response.content, 'html.parser')
+        
+        # استخراج قیمت‌ها
+        prices = extract_prices_from_html(soup)
+        
+        if not prices:
+            logger.warning("هیچ قیمتی یافت نشد")
+            return None
             
-            logger.info(f"تلاش {attempt + 1} برای دریافت داده")
-            
-            response = requests.get(url, headers=headers, timeout=30, proxies=proxies)
-            
-            if response.status_code == 200:
-                soup = BeautifulSoup(response.content, 'lxml')
-                
-                # استخراج قیمت‌ها
-                prices = extract_prices(soup)
-                
-                # ایجاد پیام برای ارسال
-                message = f"<b>📊 قیمت‌های میلگرد A3 - {iran_time}</b>\n\n"
-                
-                if prices:
-                    for company, sizes in prices.items():
-                        message += f"<b>🏭 {company}:</b>\n"
-                        for size, price in sizes.items():
-                            message += f"   🔸 {size} = {price}\n"
-                        message += "\n"
-                else:
-                    message += "⚠️ قیمتی یافت نشد\n"
-                
-                message += f"\n📎 منبع: آهن آنلاین"
-                
-                # ارسال به تلگرام
-                send_telegram_message(message)
-                
-                logger.info("استخراج و ارسال با موفقیت انجام شد")
-                break
-                
-            else:
-                logger.warning(f"خطای HTTP: {response.status_code}")
-                
-        except requests.exceptions.RequestException as e:
-            logger.warning(f"خطای شبکه: {str(e)}، تلاش مجدد...")
-            continue
-        except Exception as e:
-            logger.error(f"خطا در اسکراپ: {str(e)}")
-            continue
-    
-    return all_prices
+        return prices
+        
+    except Exception as e:
+        logger.error(f"خطا در اسکراپ: {str(e)}")
+        return None
 
-def extract_prices(soup):
-    """استخراج قیمت‌های واقعی از صفحه آهن آنلاین"""
+def extract_prices_from_html(soup):
+    """استخراج قیمت‌ها از HTML سایت"""
     prices = {}
     
     try:
-        # داده‌های کامل برای تمام سایزها و شرکت‌ها
-        prices = {
-            "ذوب آهن اصفهان": {
-                "سایز 8": "310,000 تومان",
-                "سایز 10": "315,000 تومان",
-                "سایز 12": "325,000 تومان",
-                "سایز 14": "335,000 تومان", 
-                "سایز 16": "345,000 تومان",
-                "سایز 18": "355,000 تومان",
-                "سایز 20": "365,000 تومان",
-                "سایز 22": "375,000 تومان",
-                "سایز 25": "385,000 تومان",
-                "سایز 28": "395,000 تومان",
-                "سایز 32": "405,000 تومان"
-            },
-            "فولاد مبارکه": {
-                "سایز 8": "305,000 تومان",
-                "سایز 10": "310,000 تومان",
-                "سایز 12": "320,000 تومان",
-                "سایز 14": "330,000 تومان",
-                "سایز 16": "340,000 تومان",
-                "سایز 18": "350,000 تومان",
-                "سایز 20": "360,000 تومان",
-                "سایز 22": "370,000 تومان",
-                "سایز 25": "380,000 تومان",
-                "سایز 28": "390,000 تومان",
-                "سایز 32": "400,000 تومان"
-            },
-            "کاویان": {
-                "سایز 8": "300,000 تومان",
-                "سایز 10": "305,000 تومان",
-                "سایز 12": "315,000 تومان",
-                "سایز 14": "325,000 تومان",
-                "سایز 16": "335,000 تومان",
-                "سایز 18": "345,000 تومان",
-                "سایز 20": "355,000 تومان",
-                "سایز 22": "365,000 تومان",
-                "سایز 25": "375,000 تومان",
-                "سایز 28": "385,000 تومان",
-                "سایز 32": "395,000 تومان"
-            },
-            "ظفر بناب": {
-                "سایز 8": "295,000 تومان",
-                "سایز 10": "300,000 تومان",
-                "سایز 12": "310,000 تومان",
-                "سایز 14": "320,000 تومان",
-                "سایز 16": "330,000 تومان",
-                "سایز 18": "340,000 تومان",
-                "سایz 20": "350,000 تومان",
-                "سایز 22": "360,000 تومان",
-                "سایز 25": "370,000 تومان",
-                "سایز 28": "380,000 تومان",
-                "سایز 32": "390,000 تومان"
-            },
-            "نیشابور": {
-                "سایز 8": "290,000 تومان",
-                "سایز 10": "295,000 تومان",
-                "سایز 12": "305,000 تومان",
-                "سایز 14": "315,000 تومان",
-                "سایز 16": "325,000 تومان",
-                "سایز 18": "335,000 تومان",
-                "سایز 20": "345,000 تومان",
-                "سایز 22": "355,000 تومان",
-                "سایز 25": "365,000 تومان",
-                "سایز 28": "375,000 تومان",
-                "سایز 32": "385,000 تومان"
-            }
-        }
+        # پیدا کردن محصولات میلگرد
+        products = soup.find_all('div', class_='product')
+        
+        for product in products:
+            # بررسی اینکه محصول میلگرد A3 است
+            title_element = product.find('h2', class_='product-title')
+            if not title_element:
+                continue
                 
+            title = title_element.get_text(strip=True).lower()
+            if 'میلگرد' not in title and 'a3' not in title:
+                continue
+            
+            # استخراج نام شرکت
+            company = extract_company_name(title)
+            if not company:
+                continue
+            
+            # استخراج سایز
+            size = extract_size(title)
+            if not size:
+                continue
+            
+            # استخراج قیمت
+            price_element = product.find('span', class_='price')
+            if not price_element:
+                continue
+                
+            price = price_element.get_text(strip=True)
+            
+            # افزودن به دیکشنری
+            if company not in prices:
+                prices[company] = {}
+            
+            prices[company][f"سایز {size}"] = price
+            
     except Exception as e:
-        logger.error(f"خطا در استخراج قیمت‌ها: {str(e)}")
+        logger.error(f"خطا در استخراج از HTML: {str(e)}")
     
     return prices
 
+def extract_company_name(title):
+    """استخراج نام شرکت از عنوان محصول"""
+    companies = [
+        'ذوب آهن', 'فولاد مبارکه', 'کاویان', 'ظفر بناب', 'نیشابور',
+        'خوزستان', 'اهواز', 'اصفهان', 'مبارکه', 'کاویان'
+    ]
+    
+    for company in companies:
+        if company in title:
+            return company
+    return None
+
+def extract_size(title):
+    """استخراج سایز از عنوان محصول"""
+    # جستجوی الگوهای سایز (مثلاً ۱۶، 16، ۱۶مم، 16mm)
+    size_patterns = [
+        r'(\d+)\s*مم',
+        r'(\d+)\s*mm',
+        r'سایز\s*(\d+)',
+        r'size\s*(\d+)',
+        r'\b(\d{1,2})\b'
+    ]
+    
+    for pattern in size_patterns:
+        match = re.search(pattern, title)
+        if match:
+            size = match.group(1)
+            # اطمینان از اینکه سایز بین 8 تا 32 است
+            if size.isdigit() and 8 <= int(size) <= 32:
+                return size
+    
+    return None
+
+def format_prices_message(prices, iran_time):
+    """قالب‌بندی پیام قیمت‌ها"""
+    if not prices:
+        return "⚠️ قیمتی یافت نشد"
+    
+    message = f"<b>📊 قیمت‌های میلگرد A3 - {iran_time}</b>\n\n"
+    
+    for company, sizes in prices.items():
+        message += f"<b>🏭 {company}:</b>\n"
+        
+        # مرتب کردن سایزها از کوچک به بزرگ
+        sorted_sizes = sorted(sizes.items(), key=lambda x: int(x[0].replace('سایز ', '')))
+        
+        for size, price in sorted_sizes:
+            message += f"   🔸 {size} = {price}\n"
+        
+        message += "\n"
+    
+    message += f"📎 منبع: آهن آنلاین\n"
+    message += f"⚡ به روزرسانی آنی"
+    
+    return message
+
+def main():
+    """تابع اصلی"""
+    logger.info("شروع استخراج قیمت‌های میلگرد...")
+    
+    # دریافت تاریخ ایران
+    iran_time = get_iran_time()
+    
+    # استخراج قیمت‌ها از سایت
+    prices = scrape_ahanonline_prices()
+    
+    if prices:
+        # فرمت‌بندی پیام
+        message = format_prices_message(prices, iran_time)
+        
+        # نمایش در کنسول
+        print("=" * 50)
+        print(message.replace('<b>', '').replace('</b>', ''))
+        print("=" * 50)
+        
+        # ارسال به تلگرام
+        send_telegram_message(message)
+        
+        logger.info(f"استخراج موفق: {len(prices)} شرکت یافت شد")
+    else:
+        error_msg = "⚠️ خطا در دریافت قیمت‌ها از آهن آنلاین"
+        print(error_msg)
+        send_telegram_message(error_msg)
+        logger.error("استخراج ناموفق")
+
 if __name__ == "__main__":
-    logger.info("شروع اسکراپ قیمت‌های فولاد...")
-    prices = scrape_milgard_ahanonline()
-    logger.info(f"اسکراپ تکمیل شد. {len(prices)} شرکت یافت شد.")
+    main()
