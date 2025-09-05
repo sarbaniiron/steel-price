@@ -1,11 +1,11 @@
-رname: Steel Price Checker Selenium
+name: Steel Price Checker Selenium
 
 on:
   schedule:
-    - cron: "30 4 * * *"
-    - cron: "30 8 * * *"
-    - cron: "30 12 * * *"
-    - cron: "30 16 * * *"
+    - cron: "30 4 * * *"    # ۸:۰۰ صبح ایران
+    - cron: "30 8 * * *"    # ۱۲:۰۰ ظهر ایران
+    - cron: "30 12 * * *"   # ۱۶:۰۰ عصر ایران
+    - cron: "30 16 * * *"   # ۲۰:۰۰ شب ایران
   workflow_dispatch:
 
 jobs:
@@ -35,4 +35,3 @@ jobs:
       env:
         BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
         CHAT_ID: ${{ secrets.CHAT_ID }}
-      run: python steel_scraper.py
