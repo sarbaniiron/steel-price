@@ -1,7 +1,7 @@
 import requests
 from bs4 import BeautifulSoup
 import logging
-from fp.fp import FreeProxy
+from free_proxy import FreeProxy
 import random
 
 logger = logging.getLogger(__name__)
