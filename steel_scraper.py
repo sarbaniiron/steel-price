@@ -24,21 +24,13 @@ def setup_driver():
     options.add_argument("--window-size=1920,1080")
     options.add_argument("--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
     
-    # استفاده از Chrome پیش‌نصب شده در GitHub Actions
-    options.binary_location = "/usr/bin/google-chrome"
-    
     try:
-        # استفاده از ChromeDriver پیش‌نصب شده
-        driver = webdriver.Chrome(service=Service("/usr/bin/chromedriver"), options=options)
+        # در GitHub Actions از chrome-action استفاده می‌کنیم
+        driver = webdriver.Chrome(options=options)
         return driver
-    except WebDriverException:
-        try:
-            # راه‌حل جایگزین
-            driver = webdriver.Chrome(options=options)
-            return driver
-        except Exception as e:
-            logger.error(f"خطا در راه‌اندازی درایور: {e}")
-            return None
+    except Exception as e:
+        logger.error(f"خطا در راه‌اندازی درایور: {e}")
+        return None
 
 def scrape_prices():
     driver = setup_driver()
@@ -48,49 +40,65 @@ def scrape_prices():
 
     try:
         logger.info("در حال باز کردن صفحه آهن آنلاین...")
-        driver.get("https://ahanonline.com/product-category/میلگرد/قیمت-میلگرد/")
-
+        driver.get("https://ahanonline.com/")
+        
+        # ابتدا به صفحه اصلی برویم سپس به صفحه قیمت‌ها
         wait = WebDriverWait(driver, 20)
         
-        # منتظر بارگذاری صفحه بمانید
-        wait.until(EC.presence_of_element_located((By.TAG_NAME, "body")))
-        
-        # اسکرول به پایین برای بارگذاری کامل
-        driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
-        
-        # منتظر المنت‌های قیمت بمانید
+        # پیدا کردن لینک قیمت میلگرد
         try:
-            products = wait.until(
-                EC.presence_of_all_elements_located((By.CSS_SELECTOR, ".product, .price-item, [class*='price']"))
+            milgard_link = wait.until(
+                EC.element_to_be_clickable((By.XPATH, "//a[contains(text(), 'میلگرد') or contains(text(), 'قیمت')]"))
             )
-        except TimeoutException:
-            # اگر المنت‌های خاص پیدا نشدند، از کل صفحه استفاده کنید
-            products = driver.find_elements(By.TAG_NAME, "body")
-
+            milgard_link.click()
+            logger.info("رفتن به صفحه قیمت میلگرد...")
+        except:
+            # اگر لینک مستقیم پیدا نشد، مستقیماً به URL برویم
+            driver.get("https://ahanonline.com/product-category/میلگرد/قیمت-میلگرد/")
+        
+        # منتظر بارگذاری صفحه
+        wait.until(EC.presence_of_element_located((By.TAG_NAME, "body")))
+        time.sleep(3)  # منتظر بمانید تا JavaScript اجرا شود
+        
+        # اسکرول به پایین
+        driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
+        time.sleep(2)
+        
+        # استخراج اطلاعات از صفحه
+        page_content = driver.page_source
+        
+        # آنالیز ساده محتوا
         prices_list = []
-        for prod in products[:20]:  # محدود کردن برای جلوگیری از overload
-            try:
-                name = prod.text.strip()
-                if name and ("میلگرد" in name or "قیمت" in name or "تومان" in name):
-                    prices_list.append(name)
-            except:
-                continue
-
+        
+        # جستجوی قیمت‌ها در متن صفحه
+        import re
+        price_matches = re.findall(r'(\d{1,3}(?:,\d{3})*\s*تومان)', page_content)
+        product_matches = re.findall(r'(میلگرد|آجدار|A3|سایز\s*\d+)', page_content)
+        
+        if price_matches:
+            for i, price in enumerate(price_matches[:10]):  # فقط 10 قیمت اول
+                product_name = product_matches[i] if i < len(product_matches) else "میلگرد"
+                prices_list.append(f"{product_name}: {price}")
+        
+        # آماده کردن پیام
+        today = datetime.datetime.now().strftime("%Y/%m/%d %H:%M")
+        
         if prices_list:
-            today = datetime.datetime.now().strftime("%Y/%m/%d %H:%M")
             message = f"📊 قیمت‌های میلگرد - {today}\n\n"
-            for price in prices_list[:10]:  # فقط 10 آیتم اول
-                message += f"• {price}\n"
+            message += "\n".join(prices_list)
         else:
-            today = datetime.datetime.now().strftime("%Y/%m/%d %H:%M")
-            message = f"📊 قیمت‌های میلگرد - {today}\n\n⚠️ قیمتی یافت نشد\n\n"
-            # نمایش HTML برای دیباگ
-            message += "📋 محتوای صفحه:\n"
-            message += driver.page_source[:500] + "..."  # فقط 500 کاراکتر اول
-
+            message = f"📊 قیمت‌های میلگرد - {today}\n\n"
+            message += "⚠️ قیمت مستقیم یافت نشد\n\n"
+            message += "📋 محتوای شناسایی شده:\n"
+            
+            # نمایش برخی از متن‌های مرتبط
+            content_samples = re.findall(r'.{0,100}(میلگرد|قیمت|تومان).{0,100}', page_content)
+            for sample in content_samples[:5]:
+                message += f"• {sample}\n"
+        
         message += "\n📎 منبع: آهن آنلاین"
-
-        # ارسال به تلگرام
+        
+        # ارسال پیام
         send_telegram_message(message)
 
     except Exception as e:
@@ -111,11 +119,21 @@ def send_telegram_message(message):
             return
             
         bot = telegram.Bot(token=bot_token)
-        bot.send_message(chat_id=chat_id, text=message)
+        
+        # تقسیم پیام طولانی به قسمت‌های کوچکتر
+        if len(message) > 4000:
+            parts = [message[i:i+4000] for i in range(0, len(message), 4000)]
+            for part in parts:
+                bot.send_message(chat_id=chat_id, text=part)
+                time.sleep(1)
+        else:
+            bot.send_message(chat_id=chat_id, text=message)
+            
         logger.info("پیام با موفقیت ارسال شد")
         
     except Exception as e:
         logger.error(f"خطا در ارسال پیام تلگرام: {e}")
 
 if __name__ == "__main__":
+    import time
     scrape_prices()
