@@ -1,166 +1,247 @@
 import requests
 from bs4 import BeautifulSoup
-import logging
-import random
-from datetime import datetime
-import jdatetime
 import os
 from telegram import Bot
 from telegram.error import TelegramError
+import logging
+from datetime import datetime
+import jdatetime
+import time
 
-# تنظیمات لاگ‌گیری
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.FileHandler('steel_scraper.log'),
-        logging.StreamHandler()
-    ]
-)
+# تنظیمات لاگ
+logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-def get_fresh_proxy():
-    """دریافت پروکسی جدید و فعال"""
+# تنظیمات پروکسی - پروکسی خود را اینجا قرار دهید
+PROXIES = {
+    'http': 'http://username:password@proxy_ip:proxy_port',
+    'https': 'http://username:password@proxy_ip:proxy_port'
+}
+
+def scrape_ahan_online_milgard():
+    """اسکراپ قیمت میلگردهای A3 از آهن آنلاین"""
+    prices = {}
     try:
-        # لیستی از پروکسی‌های رایگان (می‌توانید扩充 کنید)
-        free_proxies = [
-            # 'http://proxy1:port',
-            # 'http://proxy2:port',
-            # ...
-        ]
+        url = "https://ahanonline.com/product-category/میلگرد/قیمت-میلگرد/"
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+            'Accept-Language': 'fa-IR,fa;q=0.9,en-US;q=0.8,en;q=0.7',
+        }
         
-        if free_proxies:
-            proxy = random.choice(free_proxies)
-            logger.info(f"پروکسی انتخاب شد: {proxy}")
-            return {
-                'http': proxy,
-                'https': proxy
+        response = requests.get(url, headers=headers, timeout=30, proxies=PROXIES)
+        
+        if response.status_code == 200:
+            soup = BeautifulSoup(response.content, 'html.parser')
+            
+            # اینجا سلکتورهای دقیق سایت را باید قرار دهید
+            # مثال فرضی:
+            products = {
+                '12': '.rebar-12-price',
+                '14': '.rebar-14-price', 
+                '16': '.rebar-16-price',
+                '18': '.rebar-18-price',
+                '20': '.rebar-20-price'
             }
+            
+            for size, selector in products.items():
+                element = soup.select_one(selector)
+                if element:
+                    prices[f'میلگرد سایز {size}'] = element.text.strip() + ' تومان'
+                    
         else:
-            logger.info("هیچ پروکسی در دسترس نیست، ادامه بدون پروکسی")
-            return None
+            logger.error(f"خطا در دریافت میلگرد. کد وضعیت: {response.status_code}")
             
     except Exception as e:
-        logger.error(f"خطا در دریافت پروکسی: {str(e)}")
-        return None
+        logger.error(f"خطا در دریافت قیمت میلگرد: {str(e)}")
+    
+    return prices
 
-def send_telegram_message(message):
+def scrape_ahan_online_profile():
+    """اسکراپ قیمت پروفیل از آهن آنلاین"""
+    prices = {}
+    try:
+        url = "https://ahanonline.com/product-category/انواع-پروفیل/پروفیل/"
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+        }
+        
+        response = requests.get(url, headers=headers, timeout=30, proxies=PROXIES)
+        
+        if response.status_code == 200:
+            soup = BeautifulSoup(response.content, 'html.parser')
+            
+            # سلکتورهای پروفیل
+            profiles = {
+                '4x4': '.profile-4x4-price',
+                '5x5': '.profile-5x5-price',
+                '6x6': '.profile-6x6-price',
+                '8x8': '.profile-8x8-price'
+            }
+            
+            for size, selector in profiles.items():
+                element = soup.select_one(selector)
+                if element:
+                    prices[f'قوطی {size}'] = element.text.strip() + ' تومان'
+                    
+        else:
+            logger.error(f"خطا در دریافت پروفیل. کد وضعیت: {response.status_code}")
+            
+    except Exception as e:
+        logger.error(f"خطا در دریافت قیمت پروفیل: {str(e)}")
+    
+    return prices
+
+def scrape_ahan_online_nabshi():
+    """اسکراپ قیمت نبشی از آهن آنلاین"""
+    prices = {}
+    try:
+        url = "https://ahanonline.com/product-category/نشبی-و-ناودانی/نشبی/"
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+        }
+        
+        response = requests.get(url, headers=headers, timeout=30, proxies=PROXIES)
+        
+        if response.status_code == 200:
+            soup = BeautifulSoup(response.content, 'html.parser')
+            
+            # سلکتورهای نبشی
+            nabshi_sizes = {
+                '40': {
+                    '4mm': '.nabshi-40-4mm-price',
+                    '5mm': '.nabshi-40-5mm-price'
+                },
+                '50': {
+                    '5mm': '.nabshi-50-5mm-price', 
+                    '6mm': '.nabshi-50-6mm-price'
+                },
+                '60': {
+                    '6mm': '.nabshi-60-6mm-price',
+                    '8mm': '.nabshi-60-8mm-price'
+                }
+            }
+            
+            for size, thicknesses in nabshi_sizes.items():
+                for thickness, selector in thicknesses.items():
+                    element = soup.select_one(selector)
+                    if element:
+                        prices[f'نبشی {size} ضخامت {thickness}'] = element.text.strip() + ' تومان'
+                        
+        else:
+            logger.error(f"خطا در دریافت نبشی. کد وضعیت: {response.status_code}")
+            
+    except Exception as e:
+        logger.error(f"خطا در دریافت قیمت نبشی: {str(e)}")
+    
+    return prices
+
+def scrape_ahan_online_loule():
+    """اسکراپ قیمت لوله از آهن آنلاین"""
+    prices = {}
+    try:
+        url = "https://ahanonline.com/product-category/انواع-لوله/لوله-درز-مستقیم/"
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+        }
+        
+        response = requests.get(url, headers=headers, timeout=30, proxies=PROXIES)
+        
+        if response.status_code == 200:
+            soup = BeautifulSoup(response.content, 'html.parser')
+            
+            # سلکتورهای لوله
+            loule_sizes = {
+                '1': '.loule-1-price',
+                '2': '.loule-2-price',
+                '3': '.loule-3-price', 
+                '4': '.loule-4-price',
+                '5': '.loule-5-price',
+                '6': '.loule-6-price'
+            }
+            
+            for size, selector in loule_sizes.items():
+                element = soup.select_one(selector)
+                if element:
+                    prices[f'لوله سایز {size}'] = element.text.strip() + ' تومان'
+                    
+        else:
+            logger.error(f"خطا در دریافت لوله. کد وضعیت: {response.status_code}")
+            
+    except Exception as e:
+        logger.error(f"خطا در دریافت قیمت لوله: {str(e)}")
+    
+    return prices
+
+def get_all_prices():
+    """دریافت قیمت‌ها از تمام دسته‌ها"""
+    all_prices = {}
+    
+    # استخراج از تمام بخش‌ها
+    all_prices.update(scrape_ahan_online_milgard())
+    all_prices.update(scrape_ahan_online_profile())
+    all_prices.update(scrape_ahan_online_nabshi())
+    all_prices.update(scrape_ahan_online_loule())
+    
+    return all_prices
+
+def send_telegram_message(prices):
     """ارسال پیام به تلگرام"""
     try:
         bot_token = os.getenv('BOT_TOKEN')
         chat_id = os.getenv('CHAT_ID')
         
         if not bot_token or not chat_id:
-            logger.error("توکن ربات یا چت آیدی تنظیم نشده است")
+            logger.error("توکن ربات یا شناسه چت تنظیم نشده است")
             return False
-            
+        
         bot = Bot(token=bot_token)
+        
+        if prices:
+            # تاریخ شمسی
+            jalali_date = jdatetime.datetime.now().strftime('%Y/%m/%d')
+            
+            message = f"💰 قیمت آهن آلات - {jalali_date}\n\n"
+            
+            # گروه‌بندی قیمت‌ها
+            categories = {
+                'میلگرد': [],
+                'قوطی': [],
+                'نبشی': [],
+                'لوله': []
+            }
+            
+            for product, price in prices.items():
+                if 'میلگرد' in product:
+                    categories['میلگرد'].append(f"🔸 {product}: {price}")
+                elif 'قوطی' in product:
+                    categories['قوطی'].append(f"🔸 {product}: {price}")
+                elif 'نبشی' in product:
+                    categories['نبشی'].append(f"🔸 {product}: {price}")
+                elif 'لوله' in product:
+                    categories['لوله'].append(f"🔸 {product}: {price}")
+            
+            # ساخت پیام نهایی
+            for category, items in categories.items():
+                if items:
+                    message += f"💰 {category}:\n"
+                    message += "\n".join(items) + "\n\n"
+            
+            message += "📊 منبع: ahanonline.com"
+            
+        else:
+            message = "⚠️ امروز قادر به دریافت قیمت‌ها نبودم. لطفاً بعداً تلاش کنید."
+        
         bot.send_message(chat_id=chat_id, text=message)
         logger.info("پیام با موفقیت ارسال شد")
         return True
         
     except TelegramError as e:
-        logger.error(f"خطا در ارسال پیام تلگرام: {str(e)}")
+        logger.error(f"خطای تلگرام: {str(e)}")
         return False
     except Exception as e:
-        logger.error(f"خطای غیرمنتظره در ارسال پیام: {str(e)}")
+        logger.error(f"خطای غیرمنتظره: {str(e)}")
         return False
-
-def scrape_milgard_ahanonline():
-    """اسکراپ قیمت میلگرد از آهن آنلاین"""
-    milgard_prices = {}
-    max_retries = 3
-    
-    # تاریخ و ساعت فعلی
-    now = datetime.now()
-    jalali_date = jdatetime.datetime.fromgregorian(datetime=now).strftime('%Y/%m/%d %H:%M')
-    
-    for attempt in range(max_retries):
-        try:
-            # دریافت پروکسی
-            proxies = get_fresh_proxy()
-            
-            url = "https://ahanonline.com/product-category/میلگرد/قیمت-میلگرد/"
-            headers = {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
-                'Accept-Language': 'fa-IR,fa;q=0.9,en-US;q=0.8,en;q=0.7',
-                'Referer': 'https://ahanonline.com/',
-                'Connection': 'keep-alive'
-            }
-            
-            logger.info(f"تلاش {attempt + 1} برای دریافت داده")
-            
-            response = requests.get(url, headers=headers, timeout=30, proxies=proxies)
-            
-            if response.status_code == 200:
-                soup = BeautifulSoup(response.content, 'lxml')
-                
-                # استخراج قیمت‌ها (این سلکتورها نیاز به تنظیم دقیق دارند)
-                prices = extract_prices(soup)
-                milgard_prices.update(prices)
-                
-                # ایجاد پیام برای ارسال
-                message = f"📊 قیمت‌های میلگرد - {jalali_date}\n\n"
-                
-                if milgard_prices:
-                    for product, price in milgard_prices.items():
-                        message += f"🔹 {product}: {price}\n"
-                else:
-                    message += "⚠️ قیمتی یافت نشد\n"
-                
-                message += f"\n📎 منبع: آهن آنلاین"
-                
-                # ارسال به تلگرام
-                send_telegram_message(message)
-                
-                logger.info("استخراج و ارسال با موفقیت انجام شد")
-                break
-                
-            else:
-                logger.warning(f"خطای HTTP: {response.status_code}")
-                
-        except requests.exceptions.RequestException as e:
-            logger.warning(f"خطای شبکه: {str(e)}، تلاش مجدد...")
-            continue
-        except Exception as e:
-            logger.error(f"خطا در اسکراپ: {str(e)}")
-            continue
-    
-    return milgard_prices
-
-def extract_prices(soup):
-    """استخراج قیمت‌ها از صفحه"""
-    prices = {}
-    
-    try:
-        # این بخش نیاز به آنالیز دقیق ساختار HTML سایت دارد
-        # نمونه استخراج فرضی:
-        
-        # پیدا کردن المنت‌های حاوی قیمت
-        price_elements = soup.find_all('span', class_='price')
-        
-        for element in price_elements[:10]:  # محدود کردن برای تست
-            product_name = "میلگرد A3"
-            price_text = element.get_text(strip=True)
-            
-            if price_text and 'تومان' in price_text:
-                prices[product_name] = price_text
-                
-    except Exception as e:
-        logger.error(f"خطا در استخراج قیمت‌ها: {str(e)}")
-    
-    # داده نمونه برای تست
-    if not prices:
-        prices = {
-            'میلگرد 16 آجدار': '325,000 تومان',
-            'میلگرد 14 ساده': '310,000 تومان',
-            'میلگرد 18 صنعتی': '340,000 تومان'
-        }
-    
-    return prices
 
 if __name__ == "__main__":
-    logger.info("شروع اسکراپ قیمت‌های فولاد...")
-    prices = scrape_milgard_ahanonline()
-    logger.info(f"اسکراپ завер شد. {len(prices)} قیمت یافت شد.")
+    prices = get_all_prices()
+    send_telegram_message(prices)
