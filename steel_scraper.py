@@ -19,9 +19,8 @@ logging.basicConfig(
 )
 logger = logging.getLogger("steel_scraper")
 
-
 def get_fresh_proxy():
-    """دریافت پروکسی جدید و فعال"""
+    """دریافت پروکسی جدید و فعال (اختیاری)"""
     try:
         free_proxies = [
             # 'http://proxy1:port',
@@ -35,11 +34,9 @@ def get_fresh_proxy():
         else:
             logger.info("هیچ پروکسی در دسترس نیست، ادامه بدون پروکسی")
             return None
-            
     except Exception as e:
         logger.error(f"خطا در دریافت پروکسی: {str(e)}")
         return None
-
 
 def send_telegram_message(message):
     """ارسال پیام به تلگرام"""
@@ -50,7 +47,7 @@ def send_telegram_message(message):
         if not bot_token or not chat_id:
             logger.error("توکن ربات یا چت آیدی تنظیم نشده است")
             return False
-            
+        
         bot = Bot(token=bot_token)
         bot.send_message(chat_id=chat_id, text=message, parse_mode="HTML")
         logger.info("پیام با موفقیت ارسال شد")
@@ -63,50 +60,32 @@ def send_telegram_message(message):
         logger.error(f"خطای غیرمنتظره در ارسال پیام: {str(e)}")
         return False
 
-
 def extract_prices(soup):
-    """استخراج قیمت میلگرد از صفحه و دسته‌بندی بر اساس کارخانه و سایز"""
+    """
+    استخراج قیمت میلگرد از صفحه آهن‌آنلاین
+    خروجی: دیکشنری {(factory, size): price}
+    """
     prices = {}
 
-    # پیدا کردن محصولات
-    products = soup.select("div.product-item, li.product")  # بستگی به ساختار سایت داره
+    # پیدا کردن هر بخش برند (کارخانه)
+    brand_sections = soup.select("div.products > ul > li")
 
-    for product in products:
-        # عنوان محصول
-        title = product.select_one("h2.woocommerce-loop-product__title")
-        if not title:
+    for brand in brand_sections:
+        factory_tag = brand.select_one("h2 a")
+        if not factory_tag:
             continue
-        title_text = title.get_text(strip=True)
+        factory_name = factory_tag.get_text(strip=True)
 
-        # قیمت محصول
-        price_tag = product.select_one("span.woocommerce-Price-amount")
-        if not price_tag:
-            continue
-        price_text = price_tag.get_text(strip=True)
-
-        # تعیین کارخانه
-        factory = "نامشخص"
-        if "ذوب" in title_text:
-            factory = "ذوب‌آهن اصفهان"
-        elif "میانه" in title_text:
-            factory = "میانه"
-        elif "فایکو" in title_text:
-            factory = "فایکو"
-        elif "بناب" in title_text:
-            factory = "بناب"
-
-        # تعیین سایز
-        size = "نامشخص"
-        for s in range(8, 40):  # سایزهای معمول میلگرد
-            if f"{s}" in title_text:
-                size = f"{s}"
-                break
-
-        key = (factory, size)
-        prices[key] = price_text
+        # ردیف‌های جدول قیمت
+        rows = brand.select("table tr")[1:]  # حذف هدر جدول
+        for row in rows:
+            cols = row.find_all("td")
+            if len(cols) >= 3:
+                size = cols[0].get_text(strip=True)
+                price = cols[2].get_text(strip=True)
+                prices[(factory_name, size)] = price
 
     return prices
-
 
 def scrape_milgard_ahanonline():
     """اسکراپ قیمت میلگرد از آهن آنلاین"""
@@ -120,7 +99,7 @@ def scrape_milgard_ahanonline():
     for attempt in range(max_retries):
         try:
             proxies = get_fresh_proxy()
-            url = "https://ahanonline.com/product-category/میلگرد/قیمت-میلگرد/"
+            url = "https://ahanonline.com/product-category/%D9%85%DB%8C%D9%84%DA%AF%D8%B1%D8%AF/%D9%82%DB%8C%D9%85%D8%AA-%D9%85%DB%8C%D9%84%DA%AF%D8%B1%D8%AF/"
             headers = {
                 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
                 'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
@@ -154,15 +133,13 @@ def scrape_milgard_ahanonline():
                 
                 message += "📎 منبع: آهن آنلاین"
                 
-                # ارسال
                 send_telegram_message(message)
-                logger.info("استخراج و ارسال با موفقیت انجام شد")
+                logger.info("استخراج و ارسال موفقیت‌آمیز بود")
                 break
             else:
-                logger.warning(f"خطا در دریافت داده، کد وضعیت: {response.status_code}")
+                logger.warning(f"HTTP response status: {response.status_code}")
         except Exception as e:
-            logger.error(f"خطا در تلاش {attempt + 1}: {str(e)}")
-
+            logger.error(f"خطا در تلاش {attempt + 1}: {e}")
 
 if __name__ == "__main__":
     scrape_milgard_ahanonline()
