@@ -6,7 +6,6 @@ on:
     - cron: "30 8 * * *"    # ۱۲:۰۰ ظهر ایران (۸:۳۰ UTC)  
     - cron: "30 12 * * *"   # ۱۶:۰۰ عصر ایران (۱۲:۳۰ UTC)
     - cron: "30 16 * * *"   # ۲۰:۰۰ شب ایران (۱۶:۳۰ UTC)
-    - cron: "30 20 * * *"   # ۴:۰۰ بامداد ایران (۲۰:۳۰ UTC)
   workflow_dispatch:
 
 jobs:
@@ -24,9 +23,7 @@ jobs:
 
     - name: Install dependencies
       run: |
-        python -m pip install --upgrade pip
         pip install -r requirements.txt
-        pip install requests beautifulsoup4 python-telegram-bot jdatetime
 
     - name: Run price checker
       env:
