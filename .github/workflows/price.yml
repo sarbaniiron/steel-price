@@ -1,11 +1,11 @@
-name: Steel Price Checker Selenium
+name: Steel Price Checker
 
 on:
   schedule:
-    - cron: "30 4 * * *"    # ۸:۰۰ صبح ایران
-    - cron: "30 8 * * *"    # ۱۲:۰۰ ظهر ایران
-    - cron: "30 12 * * *"   # ۱۶:۰۰ عصر ایران
-    - cron: "30 16 * * *"   # ۲۰:۰۰ شب ایران
+    - cron: "30 4 * * *"
+    - cron: "30 8 * * *"
+    - cron: "30 12 * * *"
+    - cron: "30 16 * * *"
   workflow_dispatch:
 
 jobs:
@@ -21,15 +21,26 @@ jobs:
         with:
           python-version: "3.10"
 
-      - name: Install dependencies
+      - name: Install system dependencies
         run: |
-          python -m pip install --upgrade pip
-          pip install -r requirements.txt
+          sudo apt-get update
+          sudo apt-get install -y wget curl unzip
 
-      - name: Set up Chrome
-        uses: browser-actions/setup-chrome@v1
-        with:
-          chrome-version: stable
+      - name: Install Chrome
+        run: |
+          sudo apt-get install -y google-chrome-stable
+
+      - name: Install ChromeDriver
+        run: |
+          CHROME_VERSION=$(google-chrome --version | awk '{print $3}' | cut -d'.' -f1)
+          CHROMEDRIVER_VERSION=$(curl -s "https://chromedriver.storage.googleapis.com/LATEST_RELEASE_$CHROME_VERSION")
+          wget -O /tmp/chromedriver.zip "https://chromedriver.storage.googleapis.com/$CHROMEDRIVER_VERSION/chromedriver_linux64.zip"
+          sudo unzip /tmp/chromedriver.zip -d /usr/local/bin/
+          sudo chmod +x /usr/local/bin/chromedriver
+
+      - name: Install Python dependencies
+        run: |
+          pip install -r requirements.txt
 
       - name: Run price checker
         run: python steel_scraper.py
