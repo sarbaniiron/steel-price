@@ -1,235 +1,90 @@
-import requests
-from bs4 import BeautifulSoup
-import logging
+from selenium import webdriver
+from selenium.webdriver.chrome.service import Service
+from selenium.webdriver.common.by import By
+from webdriver_manager.chrome import ChromeDriverManager
+import logging, os, jdatetime
 from datetime import datetime
-import jdatetime
-import os
-import pytz
-import json
+from telegram import Bot
+from telegram.error import TelegramError
+import time
 
-# تنظیمات لاگ‌گیری
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.FileHandler('steel_scraper.log'),
-        logging.StreamHandler()
-    ]
-)
-logger = logging.getLogger(__name__)
+# لاگ
+logging.basicConfig(level=logging.INFO,
+                    format='%(asctime)s - %(levelname)s - %(message)s')
+logger = logging.getLogger("steel_scraper_selenium")
 
-def get_iran_time():
-    """دریافت تاریخ و ساعت ایران"""
+def send_telegram_message(message):
     try:
-        iran_timezone = pytz.timezone('Asia/Tehran')
-        now_utc = datetime.utcnow()
-        now_iran = now_utc.astimezone(iran_timezone)
-        
-        jalali_date = jdatetime.datetime.fromgregorian(
-            datetime=now_iran,
-            locale='fa_IR'
-        )
-        
-        date_str = jalali_date.strftime('%Y/%m/%d')
-        time_str = jalali_date.strftime('%H:%M')
-        
-        return f"{date_str} ساعت {time_str}"
-        
+        bot_token = os.getenv("BOT_TOKEN")
+        chat_id = os.getenv("CHAT_ID")
+        if not bot_token or not chat_id:
+            logger.error("توکن یا Chat ID تنظیم نشده")
+            return False
+        bot = Bot(token=bot_token)
+        bot.send_message(chat_id=chat_id, text=message, parse_mode="HTML")
+        logger.info("پیام ارسال شد")
+        return True
+    except TelegramError as e:
+        logger.error(f"Telegram error: {e}")
+        return False
     except Exception as e:
-        logger.error(f"خطا در دریافت زمان ایران: {str(e)}")
-        return "تاریخ نامعلوم"
+        logger.error(f"Error: {e}")
+        return False
 
-def scrape_ahanonline_prices():
-    """استخراج قیمت‌های میلگرد از آهن آنلاین"""
-    url = "https://ahanonline.com/product-category/میلگرد/قیمت-میلگرد/"
+def scrape_prices():
+    url = "https://ahanonline.com/product-category/%D9%85%DB%8C%D9%84%DA%AF%D8%B1%D8%AF/%D9%82%DB%8C%D9%85%D8%AA-%D9%85%DB%8C%D9%84%DA%AF%D8%B1%D8%AF/"
     
-    headers = {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
-        'Accept-Language': 'fa-IR,fa;q=0.9,en-US;q=0.8,en;q=0.7',
-        'Referer': 'https://ahanonline.com/',
-        'Connection': 'keep-alive',
-        'Accept-Encoding': 'gzip, deflate, br'
-    }
+    options = webdriver.ChromeOptions()
+    options.add_argument("--headless")  # بدون باز کردن مرورگر
+    options.add_argument("--no-sandbox")
+    options.add_argument("--disable-dev-shm-usage")
+    
+    driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=options)
     
     try:
-        logger.info("در حال اتصال به آهن آنلاین...")
-        response = requests.get(url, headers=headers, timeout=30)
+        driver.get(url)
+        time.sleep(5)  # صبر برای لود کامل جاوااسکریپت
         
-        if response.status_code != 200:
-            logger.error(f"خطای HTTP: {response.status_code}")
-            return None
-            
-        soup = BeautifulSoup(response.content, 'html.parser')
+        # پیدا کردن بخش‌های برندها
+        brand_sections = driver.find_elements(By.CSS_SELECTOR, "div.products > ul > li")
         
-        # آنالیز ساختار سایت
-        logger.info("آنالیز ساختار سایت...")
-        
-        # بررسی وجود داده‌های قیمت
-        price_data = extract_price_data(soup)
-        
-        if price_data:
-            return price_data
-        else:
-            # اگر داده مستقیم پیدا نشد، از API داخلی سایت استفاده می‌کنیم
-            return extract_from_api()
-            
-    except Exception as e:
-        logger.error(f"خطا در اسکراپ: {str(e)}")
-        return get_sample_data()
-
-def extract_price_data(soup):
-    """استخراج داده‌های قیمت از HTML"""
-    try:
-        # جستجوی المنت‌های حاوی قیمت
-        products = soup.find_all(['div', 'tr', 'li'], class_=lambda x: x and ('product' in x or 'price' in x or 'item' in x))
-        
-        prices = {}
-        
-        for product in products:
+        milgard_prices = {}
+        for brand in brand_sections:
             try:
-                # استخراج متن کامل برای آنالیز
-                text = product.get_text(strip=True)
-                
-                # تشخیص میلگرد A3
-                if 'میلگرد' in text and ('a3' in text.lower() or 'آجدار' in text):
-                    # استخراج اطلاعات
-                    company = None
-                    size = None
-                    price = None
-                    
-                    # استخراج شرکت
-                    companies = ['ذوب آهن', 'فولاد مبارکه', 'کاویان', 'ظفر', 'نیشابور', 'خوزستان']
-                    for comp in companies:
-                        if comp in text:
-                            company = comp
-                            break
-                    
-                    if not company:
-                        continue
-                    
-                    # استخراج سایز
-                    import re
-                    size_match = re.search(r'(\d+)\s*(مم|mm|سایز|size)', text)
-                    if size_match:
-                        size = f"سایز {size_match.group(1)}"
-                    
-                    # استخراج قیمت
-                    price_match = re.search(r'(\d{1,3}(?:,\d{3})*)\s*تومان', text)
-                    if price_match:
-                        price = price_match.group(0)
-                    
-                    if company and size and price:
-                        if company not in prices:
-                            prices[company] = {}
-                        prices[company][size] = price
-                        
-            except Exception as e:
+                factory_name = brand.find_element(By.CSS_SELECTOR, "h2 a").text.strip()
+                rows = brand.find_elements(By.CSS_SELECTOR, "table tr")[1:]  # حذف هدر
+                for row in rows:
+                    cols = row.find_elements(By.TAG_NAME, "td")
+                    if len(cols) >= 3:
+                        size = cols[0].text.strip()
+                        price = cols[2].text.strip()
+                        milgard_prices[(factory_name, size)] = price
+            except:
                 continue
-                
-        return prices if prices else None
         
-    except Exception as e:
-        logger.error(f"خطا در استخراج داده: {str(e)}")
-        return None
-
-def extract_from_api():
-    """سعی در یافتن API داخلی سایت"""
-    try:
-        # برخی سایت‌ها از API داخلی استفاده می‌کنند
-        api_url = "https://ahanonline.com/wp-json/wp/v2/products"
-        response = requests.get(api_url, timeout=10)
+        now = datetime.now()
+        jalali_date = jdatetime.datetime.fromgregorian(datetime=now).strftime('%Y/%m/%d %H:%M')
         
-        if response.status_code == 200:
-            data = response.json()
-            return parse_api_data(data)
+        # ساخت پیام
+        message = f"📊 قیمت‌های میلگرد - {jalali_date}\n\n"
+        if milgard_prices:
+            grouped = {}
+            for (factory, size), price in milgard_prices.items():
+                grouped.setdefault(factory, []).append((size, price))
             
-    except Exception as e:
-        logger.error(f"خطا در دریافت از API: {str(e)}")
-    
-    return None
-
-def parse_api_data(data):
-    """پارس داده‌های API"""
-    # این تابع بستگی به ساختار API دارد
-    return None
-
-def get_sample_data():
-    """داده‌های نمونه برای تست"""
-    return {
-        "ذوب آهن اصفهان": {
-            "سایز 8": "315,000 تومان",
-            "سایز 10": "320,000 تومان",
-            "سایز 12": "330,000 تومان",
-            "سایز 14": "340,000 تومان",
-            "سایز 16": "350,000 تومان",
-            "سایز 18": "360,000 تومان",
-            "سایز 20": "370,000 تومان",
-            "سایز 22": "380,000 تومان",
-            "سایز 25": "390,000 تومان",
-            "سایز 28": "400,000 تومان",
-            "سایز 32": "410,000 تومان"
-        },
-        "فولاد مبارکه": {
-            "سایز 8": "310,000 تومان",
-            "سایز 10": "315,000 تومان",
-            "سایز 12": "325,000 تومان",
-            "سایز 14": "335,000 تومان",
-            "سایز 16": "345,000 تومان",
-            "سایز 18": "355,000 تومان",
-            "سایز 20": "365,000 تومان",
-            "سایز 22": "375,000 تومان",
-            "سایز 25": "385,000 تومان",
-            "سایز 28": "395,000 تومان",
-            "سایز 32": "405,000 تومان"
-        }
-    }
-
-def format_prices_message(prices, iran_time):
-    """قالب‌بندی پیام قیمت‌ها"""
-    if not prices:
-        return "⚠️ قیمتی یافت نشد"
-    
-    message = f"<b>📊 قیمت‌های میلگرد A3 - {iran_time}</b>\n\n"
-    
-    for company, sizes in prices.items():
-        message += f"<b>🏭 {company}:</b>\n"
+            for factory, items in grouped.items():
+                message += f"🏭 <b>{factory}</b>\n"
+                for size, price in sorted(items, key=lambda x: int(x[0]) if x[0].isdigit() else 999):
+                    message += f"   🔹 سایز {size}: {price}\n"
+                message += "\n"
+        else:
+            message += "⚠️ قیمتی یافت نشد\n"
         
-        # مرتب کردن سایزها
-        sorted_sizes = sorted(
-            sizes.items(), 
-            key=lambda x: int(x[0].split()[1])
-        )
-        
-        for size, price in sorted_sizes:
-            message += f"   🔸 {size} = {price}\n"
-        
-        message += "\n"
+        message += "📎 منبع: آهن آنلاین"
+        send_telegram_message(message)
     
-    message += f"📎 منبع: آهن آنلاین\n"
-    message += f"⚡ آخرین بروزرسانی"
-    
-    return message
-
-def main():
-    """تابع اصلی"""
-    logger.info("شروع استخراج قیمت‌های میلگرد...")
-    
-    iran_time = get_iran_time()
-    prices = scrape_ahanonline_prices()
-    
-    if prices:
-        message = format_prices_message(prices, iran_time)
-        
-        print("=" * 60)
-        print(message.replace('<b>', '').replace('</b>', ''))
-        print("=" * 60)
-        
-        logger.info(f"استخراج موفق: {len(prices)} شرکت یافت شد")
-    else:
-        error_msg = "⚠️ خطا در دریافت قیمت‌ها از آهن آنلاین"
-        print(error_msg)
-        logger.error("استخراج ناموفق")
+    finally:
+        driver.quit()
 
 if __name__ == "__main__":
-    main()
+    scrape_prices()
